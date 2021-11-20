@@ -1,0 +1,2 @@
+# barycenters
+Implementing Wasserstein barycenters
