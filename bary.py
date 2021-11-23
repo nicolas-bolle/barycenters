@@ -55,10 +55,7 @@ def sinkhorn(r,c,M,l,iterations=20):
 # Computes the Sinkhorn divergence between histograms r and c, using relevant matrices M and K
 # Useful for more efficient computations, when K is precomputed
 
-# FIXME: using a fixed number of iterations for now, add a stopping condition?
 def sinkhorn_mk(r,c,M,K,iterations=20):
-    
-    ## Setup
     
     # Remove zeros in r to avoid division by zero
     I = r > 0
@@ -66,7 +63,42 @@ def sinkhorn_mk(r,c,M,K,iterations=20):
     M = M[I,:]
     K = K[I,:]
     
-    # Initialize x, a (n x k) array
+    # Reshape c
+    if len(np.shape(c)) == 1:
+        c = np.reshape(c,(len(c),1))
+    
+    # Run the iteration
+    u,v = _uv_iteration(r,c,M,K,iterations)
+    
+    # Return the distance
+    # Before the sum, we have a (n x k) array
+    # So the sum is taken for each column
+    return np.sum(u * ((K * M) @ v), axis = 0)
+
+
+
+### _uv_iteration
+
+## Inputs:
+# r: length n numpy array giving a positive (!) measure on the set of n locations
+# c: (m x k) numpy array, giving k nonnegative measures on the set of m locations
+#    Must have sum(r) = [row sums of c]
+# M: (n x m) matrix giving distances between the locations
+# K: (n x m) matrix, K = exp(-l * M) the elementwise exponential
+# iterations: number of iterations to do
+
+## Output:
+# tuple (u,v) of the vectors obtained from the iteration
+
+## Info
+# Helper function to do the Sinkhorn iteration
+
+# FIXME: using a fixed number of iterations for now, add a stopping condition?
+def _uv_iteration(r,c,M,K,iterations=20):
+    
+    ## Setup
+    
+    # Initialize x, an (n x k) array
     n = len(r)
     k = np.shape(c)[1]
     # Note: the Sinkhorn paper makes the columns of x into probability distributions, but I ignore that
@@ -88,11 +120,51 @@ def sinkhorn_mk(r,c,M,K,iterations=20):
     v = c * np.reciprocal(np.transpose(K) @ u)
     
     
-    ## Return the distance
-    # Before the sum, we have a (n x k) array
-    # So the sum is taken for each column
-    return np.sum(u * ((K * M) @ v), axis = 0)
+    ## Return (u,v)
+    return (u,v)
 
+
+
+### Dsinkhorn_reg
+
+## Inputs:
+# r: length n numpy array giving a nonnegative measure on the set of n locations
+# c: (m x k) numpy array, giving k nonnegative measures on the set of m locations
+#    Must have sum(r) = [row sums of c]
+# M: (n x m) matrix giving distances between the locations
+# l: lambda parameter
+# K: (n x m) matrix, K = exp(-l * M) the elementwise exponential
+# iterations: number of iterations to do
+
+## Output:
+# (n x k) numpy array of the k gradients
+
+## Info
+# Computes the derivative of the regularized Sinkhorn divergence between histograms r and c, using relevant matrices M and K
+# Useful for more efficient computations, when K is precomputed
+
+# FIXME: using a fixed number of iterations for now, add a stopping condition?
+def Dsinkhorn_reg(r,c,M,l,K,iterations=20):
+    
+    # Remove zeros in r to avoid division by zero
+    I = r > 0
+    r = r[I]
+    M = M[I,:]
+    K = K[I,:]
+    
+    # Reshape c
+    if len(np.shape(c)) == 1:
+        c = np.reshape(c,(len(c),1))
+    
+    # Run the iteration
+    u,_ = _uv_iteration(r,c,M,K,iterations)
+    
+    # Turn this into alpha_*
+    alpha = np.zeros((len(I),np.shape(c)[1]))
+    alpha[I,:] = np.log(u) / l
+    
+    # Return
+    return alpha
 
 
 
