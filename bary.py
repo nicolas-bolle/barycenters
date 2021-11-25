@@ -143,7 +143,6 @@ def _uv_iteration(r,c,M,K,iterations=20):
 # Computes the derivative of the regularized Sinkhorn divergence between histograms r and c, using relevant matrices M and K
 # Useful for more efficient computations, when K is precomputed
 
-# FIXME: using a fixed number of iterations for now, add a stopping condition?
 def Dsinkhorn_reg(r,c,M,l,K,iterations=20):
     
     # Remove zeros in r to avoid division by zero
@@ -160,15 +159,85 @@ def Dsinkhorn_reg(r,c,M,l,K,iterations=20):
     u,_ = _uv_iteration(r,c,M,K,iterations)
     
     # Turn this into alpha_*
+    # Need the extra step of making sure sum(alpha) = 0
     alpha = np.zeros((len(I),np.shape(c)[1]))
-    alpha[I,:] = np.log(u) / l
+    alpha_I = np.log(u) / l
+    alpha_I = alpha_I - sum(alpha_I) / len(alpha_I)
+    alpha[I,:] = alpha_I
     
     # Return
     return alpha
 
 
 
+### Dsinkhorn
 
+## Inputs:
+# r: length n numpy array giving a nonnegative measure on the set of n locations
+# c: (m x k) numpy array, giving k nonnegative measures on the set of m locations
+#    Must have sum(r) = [row sums of c]
+# M: (n x m) matrix giving distances between the locations
+# l: lambda parameter
+# K: (n x m) matrix, K = exp(-l * M) the elementwise exponential
+# iterations: number of iterations to do
+
+## Output:
+# (n x k) numpy array of the k gradients
+
+## Info
+# Computes the derivative of the sharp Sinkhorn divergence between histograms r and c, using relevant matrices M and K
+# Useful for more efficient computations, when K is precomputed
+
+def Dsinkhorn(r,c,M,l,K,iterations=20):
+    
+    # Remove zeros in r to avoid division by zero
+    I = r > 0
+    r = r[I]
+    M = M[I,:]
+    K = K[I,:]
+    
+    # Reshape c
+    if len(np.shape(c)) == 1:
+        c = np.reshape(c,(len(c),1))
+    
+    # Run the iteration
+    u,v = _uv_iteration(r,c,M,K,iterations)
+    
+    # Relevant sizes
+    n = len(r)
+    m,k = np.shape(c)
+    
+    #print(k)
+    #print(c)
+    #print('-------------------------------------')
+    #print(v)
+    
+    ## For each column of u/v/c, do the computation
+    # Could speed this up in the future, to fully vectorize things
+    gradients = np.zeros((len(I),k))
+    for i in range(k):
+        # Get the optimal transport
+        T = np.diag(u[:,i]) @ K @ np.diag(v[:,i])
+        Tbar = T[:,:-1]
+
+        # Get cK
+        cK = np.diag(r) - Tbar @ np.diag(np.reciprocal(c[:-1,i])) @ np.transpose(Tbar)
+
+        # Get L
+        L = T * M
+        Lbar = L[:,:-1]
+
+        # Get g
+        g = -L @ np.ones(m) + Tbar @ np.diag(np.reciprocal(c[:-1,i])) @ np.transpose(Lbar) @ np.ones(n)
+
+        # Get f: cK @ f = g
+        f = np.linalg.solve(cK,g)
+        
+        # Save this one
+        gradients[I,i] = l * f
+    
+    # Return all the gradients
+    return gradients
 
 
 
