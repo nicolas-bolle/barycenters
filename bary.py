@@ -207,34 +207,36 @@ def Dsinkhorn(r,c,M,l,K,iterations=20):
     n = len(r)
     m,k = np.shape(c)
     
-    #print(k)
-    #print(c)
-    #print('-------------------------------------')
-    #print(v)
-    
     ## For each column of u/v/c, do the computation
     # Could speed this up in the future, to fully vectorize things
     gradients = np.zeros((len(I),k))
+    
+    # Using p. 8 pseudocode in https://arxiv.org/abs/1805.11897
+    # Slightly modified to make it correct, and replace all-ones-vectors-multiplication with sums along rows/columns
     for i in range(k):
-        # Get the optimal transport
+        # T
         T = np.diag(u[:,i]) @ K @ np.diag(v[:,i])
         Tbar = T[:,:-1]
-
-        # Get cK
-        cK = np.diag(r) - Tbar @ np.diag(np.reciprocal(c[:-1,i])) @ np.transpose(Tbar)
-
-        # Get L
+        
+        # L
         L = T * M
         Lbar = L[:,:-1]
-
-        # Get g
-        g = -L @ np.ones(m) + Tbar @ np.diag(np.reciprocal(c[:-1,i])) @ np.transpose(Lbar) @ np.ones(n)
-
-        # Get f: cK @ f = g
-        f = np.linalg.solve(cK,g)
         
-        # Save this one
-        gradients[I,i] = l * f
+        # D1 and D2
+        D1 = np.diag(np.sum(T,axis=1))
+        D2 = np.diag(np.reciprocal(np.sum(Tbar,axis=0)))
+        
+        # H
+        H = D1 - Tbar @ D2 @ np.transpose(Tbar)
+        
+        # f: minus sign because I think the pseudocode gives the descent direction (negative gradient)
+        f = L @ np.ones(m) - Tbar @ D2 @ np.sum(Lbar,axis=0)
+        
+        # g: FIXME: scaling by lambda here? The formulas on p. 22/23 suggest that should happen
+        g = l * np.linalg.solve(H,f)
+        
+        # Compute and save: modified to use np.mean() instead of np.sum(), since the sum of the output should be zero
+        gradients[I,i] = g - np.mean(g) * np.ones(n)
     
     # Return all the gradients
     return gradients
