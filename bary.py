@@ -215,27 +215,31 @@ def Dsinkhorn(r,c,M,l,K,iterations=20):
     # Slightly modified to make it correct, and replace all-ones-vectors-multiplication with sums along rows/columns
     for i in range(k):
         # T
-        T = np.diag(u[:,i]) @ K @ np.diag(v[:,i])
+        T = np.reshape(u[:,i],(n,1)) * K * np.reshape(v[:,i],(1,m))
+        #T = np.diag(u[:,i]) @ K @ np.diag(v[:,i])
         Tbar = T[:,:-1]
         
         # L
         L = T * M
         Lbar = L[:,:-1]
         
-        # D1 and D2
+        # D1 and d2
         D1 = np.diag(np.sum(T,axis=1))
-        D2 = np.diag(np.reciprocal(np.sum(Tbar,axis=0)))
+        d2 = np.reciprocal(np.sum(Tbar,axis=0))
+        
+        # TbarD2, since we'll use it twice
+        TbarD2 = Tbar * np.reshape(d2, (1, m-1))
         
         # H
-        H = D1 - Tbar @ D2 @ np.transpose(Tbar)
+        H = D1 - TbarD2 @ np.transpose(Tbar)
         
         # f: minus sign because I think the pseudocode gives the descent direction (negative gradient)
-        f = L @ np.ones(m) - Tbar @ D2 @ np.sum(Lbar,axis=0)
+        f = np.sum(L, axis=1) - TbarD2 @ np.sum(Lbar,axis=0)
         
-        # g: FIXME: scaling by lambda here? The formulas on p. 22/23 suggest that should happen
+        # g: scaling by lambda here since the formulas on p. 22/23 suggest it
         g = l * np.linalg.solve(H,f)
         
-        # Compute and save: modified to use np.mean() instead of np.sum(), since the sum of the output should be zero
+        # Compute and save: uses np.mean() since the sum of the output should be zero
         gradients[I,i] = g - np.mean(g) * np.ones(n)
     
     # Return all the gradients
@@ -247,3 +251,82 @@ def Dsinkhorn(r,c,M,l,K,iterations=20):
 
 
 
+
+
+
+# Attempt at vectorizing: it's much slower :(
+def Dsinkhorn_prime(r,c,M,l,K,iterations=20):
+    
+    # Remove zeros in r to avoid division by zero
+    I = r > 0
+    r = r[I]
+    M = M[I,:]
+    K = K[I,:]
+    
+    # Reshape c
+    if len(np.shape(c)) == 1:
+        c = np.reshape(c,(len(c),1))
+    
+    # Run the iteration
+    u,v = _uv_iteration(r,c,M,K,iterations)
+    
+    # Relevant sizes
+    n = len(r)
+    m,k = np.shape(c)
+    
+    # Using p. 8 pseudocode in https://arxiv.org/abs/1805.11897, tensorized
+    # Slightly modified to make it correct
+    
+    # T: n x m x k
+    # Formula: T_ijk = u_ik K_ij v_jk
+    # Implemented easily by making everything a tensor and using broadcasting
+    T = np.reshape(u,(n,1,k)) * np.reshape(K,(n,m,1)) * np.reshape(v,(1,m,k))
+    Tbar = T[:,:-1,:]
+    
+    # L: n x m x k
+    L = T * np.reshape(M,(n,m,1))
+    Lbar = L[:,:-1,:]
+    
+    # D: n x k and (m-1) x k since I'm just looking at the diagonal
+    d1 = np.sum(T,axis=1)
+    d2 = np.reciprocal(np.sum(Tbar,axis=0))
+    
+    # TbarD2: n x (m-1) x k intermediate that I'll use soon
+    # Avoids making D2 as a diagonal matrix, and instead does the multiplication as elementwise multiplication + broadcasting
+    TbarD2 = Tbar * np.reshape(d2,(1,(m-1),k))
+    
+    # Give up on vectorizing H, f, g, lol
+    g = np.zeros((n,k))
+    for i in range(k):
+        print(i)
+        H = np.diag(d1[:,i]) - TbarD2[:,:,i] @ np.transpose(Tbar[:,:,i])
+        f = np.sum(L[:,:,i], axis = 1) - TbarD2[:,:,i] @ np.sum(Lbar[:,:,i], axis = 0)
+        g[:,i] = l * np.linalg.solve(H,f)
+    
+    ## Old code for H, f, g
+    
+    # This is by far the slowest step
+    #aux = np.einsum('ilk,jlk->ijk', TbarD2, Tbar)
+    #print('stop')
+    
+    # H: n x n x k
+    # 1st term: turning d1 into a diagonal matrix on each of the k slices
+    # 2nd term: formula aux_ijk = sum_l TbarD2_ilk Tbar_jlk
+    #H = np.apply_along_axis(np.diag, 0 , d1) - aux
+    
+    # f: n x k
+    #f = np.sum(L,axis=1) - np.einsum('ilj,lj->ij', TbarD2, np.sum(Lbar, axis=0))
+    
+    # g: n x k
+    # FIXME: try to vectorize this? Is it even worth it?
+    #g = np.zeros((n,k))
+    #for i in range(k):
+    #    g[:,i] = l * np.linalg.solve(H[:,:,i],f[:,i])
+    
+    # gradients: [original length of r] x k
+    # Sum of each column is zero
+    gradients = np.zeros((len(I),k))
+    gradients[I,:] = g - np.outer(np.ones(n), np.mean(g, axis = 0))
+    
+    # Return all the gradients
+    return gradients
