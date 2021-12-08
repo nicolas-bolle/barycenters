@@ -11,7 +11,13 @@
 
 
 ## Imports
+
 import numpy as np
+import matplotlib.pyplot as plt
+from tqdm.notebook import tqdm # For progress bars
+
+# Data: https://www.tensorflow.org/datasets
+import tensorflow_datasets as tfds
 
 
 
@@ -247,10 +253,187 @@ def Dsinkhorn(r,c,M,l,K,iterations=20):
 
 
 
+### load_MNIST
+
+## Inputs:
+# N: number of digits to grab
+
+## Output:
+# M: distance matrix for the 784-element histogram
+# X: (784 x N) numpy array, where columns are (normalized) histograms for each digit
+# y: length 784 numpy vector of the labels for the columns of X
+
+## Info
+# Loads in the MNIST data for running Sinkhorn stuff on it
+
+# FIXME: randomize which images we get
+def load_MNIST(N=1000):
+    
+    ## Get M
+
+    n = 28 * 28
+
+    # To make sure I don't mess up indexing things, I'll set up a list of locations and reshape it into a matrix
+    # So when I calculate a pairwise distance in the matrix, I can easily associate it to the location in the vector
+    locations_vec = np.array(range(n))
+    locations_arr = np.reshape(locations_vec, (28,28))
+
+    M = np.zeros((n,n))
+    # Having 4 "for" loops is a bit embarassing, but I'm not trying to think too hard right now
+    for i1 in range(28):
+        for j1 in range(28):
+            for i2 in range(28):
+                for j2 in range(28):
+                    M[locations_arr[i1,j1], locations_arr[i2,j2]] = np.sqrt((i1-i2)**2 + (j1-j2)**2)
+    
+    
+    ## Load MNIST data
+    ds = tfds.load('mnist', split='train')
+    
+    
+    ## Convert to a numpy array of histograms
+    
+    if N > 60000:
+        N = 60000
+        print("Can load at most 60,000 digits! Requested number of digits capped at 60,000.")
+
+    # Allocate memory
+    X = np.zeros((n,N))
+    y = np.zeros(N)
+
+    # Iterate to populate X
+    i = 0
+    for ex in ds.take(N):
+        # Make sure to normalize too!
+        aux = np.ravel(ex['image'].numpy())
+        X[:,i] = aux / sum(aux)
+        y[i]   = ex['label'].numpy()
+        i = i + 1
+    
+    
+    ## Return
+    return (M,X,y)
 
 
 
+### plot_digits
 
+## Inputs:
+# X: (784 x N) numpy array of histograms of digits to plot
+
+## Output:
+# None. Just prints a plot of the digits.
+
+## Info
+# Plots histograms of digits
+
+def plot_digits(X):
+    shape = np.shape(X)
+    
+    if len(shape) == 1 or shape[1] == 1:
+        # Single digit plot
+        img = np.reshape(X, (28,28))
+        plt.imshow(img)
+        plt.colorbar()
+        plt.show()
+        
+    else:
+        # Multi digit plot, I'll do rows of 5
+        N = shape[1]
+        
+        rows = int(np.ceil(N/5))
+        
+        fig, axs = plt.subplots(rows,5,figsize=(15,5))
+
+        # Iterate over the plotting locations
+        i = 0
+        for ax in axs.ravel():
+            if i == N:
+                break
+            ax.imshow(np.reshape(X[:,i], (28,28)))
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_title(str(i))
+            i = i + 1
+
+
+
+### sinkhorn_barycenter
+
+## Inputs:
+# M: (n x n) numpy array of distances for the histograms
+# X: (n x N) numpy array of histograms of digits to average
+# Optional ones:
+# r: the initial histogram
+
+# noise: how much of the total mass should be dedicated to "noise"; so a number [0,1)
+# steps: how many gradient descent steps to do
+# eta: the amount the (1-normalized) gradient is scaled by
+# l: lambda for the individual DSinkhorn computations
+# iterations: number of iterations to do in the DSinkhorn computations
+
+
+## Output:
+# r: histogram giving the barycenter
+# R: (n x (steps+1)) numpy array giving the histograms after each step
+# G: (n x (steps+1)) numpy array giving the (scaled) gradients used at each step
+
+## Info
+# Computes the Sinkhorn barycenter of some digits, using the gradient descent method with sharp Sinkhorn divergence
+
+def sinkhorn_barycenter(M, X, r = None, noise = 0.01, steps = 20, eta = 0.5, l = 10, iterations = 20):
+    
+    # Get relevant sizes
+    n, N = np.shape(X)
+    
+    # Initialize r (with unit mass)
+    if r is None:
+        r = np.ones(n) / n
+    else:
+        r = r / np.sum(r)
+    
+    # Rescale X to have unit mass and some "noise"
+    # So calculate how much mass is in each, add a proportionate amount of noise, and normalize
+    # The amount of noise to add is calculated so that after normalizing, the amount of "noise" matches the user input amount
+    masses = np.reshape(np.sum(X, axis = 0), (1,N))
+    X = X + ((1 / (1-noise) - 1) / n) * masses
+    masses = np.reshape(np.sum(X, axis = 0), (1,N))
+    X = X / masses
+    
+    # I scale the gradient to have 1-norm of one, which seems reasonable enough
+    # Would still like to know why the gradients I get are so big
+
+    # Kernel
+    K = np.exp(-l*M)
+
+    # For keeping track of histograms and gradients
+    R = np.zeros((n,steps+1))
+    R[:,0] = r
+    G = np.zeros((n,steps+1)) # The zero index will be unused
+
+    # Iterate
+    for i in tqdm(range(steps), desc="Gradient descent progress"):
+        # FIXME add noise to r here?
+        
+        # Gradient
+        gradients = Dsinkhorn(r,X,M,l,K,iterations)
+
+        # Average together the gradients, reformat to match shape of r, rescale, and move opposite that direction
+        g = np.reshape(np.mean(gradients, axis=1),np.shape(r))
+        g = (eta / np.sum(np.abs(g))) * g
+        r = r - g
+
+        # Keep it nonnegative and unit mass
+        r = r * (r>0)
+        r = r / sum(r)
+
+        # Save it
+        R[:,i+1] = r
+        G[:,i+1] = g
+    
+    
+    ## Return
+    return (r,R,G)
 
 
 
