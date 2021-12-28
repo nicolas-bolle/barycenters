@@ -348,13 +348,16 @@ def plot_digits(X):
         # Iterate over the plotting locations
         i = 0
         for ax in axs.ravel():
-            if i == N:
-                break
-            ax.imshow(np.reshape(X[:,i], (28,28)))
-            ax.set_xticks([])
-            ax.set_yticks([])
-            ax.set_title(str(i))
-            i = i + 1
+            if i >= N:
+                # Empty plot
+                ax.axis('off')
+            else:
+                # Plot something
+                ax.imshow(np.reshape(X[:,i], (28,28)))
+                ax.set_xticks([])
+                ax.set_yticks([])
+                ax.set_title(str(i))
+                i = i + 1
 
 
 
@@ -434,6 +437,94 @@ def sinkhorn_barycenter(M, X, r = None, noise = 0.01, steps = 20, eta = 0.5, l =
     
     ## Return
     return (r,R,G)
+
+
+
+### k_means_sinkhorn_barycenter
+
+## Inputs:
+# M: (n x n) numpy array of distances for the histograms
+# X: (n x N) numpy array of histograms of digits to cluster
+# k: number of clusters to make
+
+# Optional ones:
+# noise: how much of the total mass should be dedicated to "noise"; so a number [0,1)
+# eta: the amount the (1-normalized) gradient is scaled by
+# l: lambda for the individual DSinkhorn computations
+# iter_sink: number of iterations to do in the Sinkhorn computations
+# iter_Dsink: number of iterations to do in the DSinkhorn computations
+# iter_grad: number of gradient descent steps to do
+# iter_lloyd: number of iterations to do of Lloyd's algorithm
+
+
+## Output:
+# c: length N vector of cluster labels for the histograms
+# r: (n x k) histograms giving the centers of clusters
+# R: (n x k x (iter_lloyd+1)) numpy array giving the cluster center histograms after each step
+
+## Info
+# Clusters digits using Lloyd's algorithm with Sinkhorn divergence as the metric, and averages digits using Sinkhorn barycenters computed with sharp Sinkhorn divergence gradient descent
+
+def k_means_sinkhorn_barycenter(M, X, k, noise = 0.01, eta = 0.5, l = 10, iter_sink = 20, iter_Dsink = 20, iter_grad = 4, iter_lloyd = 10):
+    
+    # Get relevant sizes
+    n, N = np.shape(X)
+    
+    # Rescale X to have unit mass and some "noise"
+    # So calculate how much mass is in each, add a proportionate amount of noise, and normalize
+    # The amount of noise to add is calculated so that after normalizing, the amount of "noise" matches the user input amount
+    masses = np.reshape(np.sum(X, axis = 0), (1,N))
+    X = X + ((1 / (1-noise) - 1) / n) * masses
+    masses = np.reshape(np.sum(X, axis = 0), (1,N))
+    X = X / masses
+    
+    # Initialize r as k random digits
+    I = np.random.choice(N, size = k, replace = False)
+    r = X[:,I]
+    
+    # Kernel
+    K = np.exp(-l*M)
+    
+    # For keeping track of histograms
+    R = np.zeros((n,k,iter_lloyd+1))
+    R[:,:,0] = r
+    
+    # For measuring distances between cluster centers and digits
+    D = np.zeros((k,N))
+    
+    # Iterate
+    for i in tqdm(range(iter_lloyd), desc="Lloyd's algorithm progress"):
+        
+        ## Compute clusters of digits
+        print('start clusters')
+        # Distances
+        for j in range(k):
+            D[j,:] = sinkhorn_mk(r[:,j],X,M,K,iterations=iter_sink)
+        
+        # Pick clusters
+        c = np.argmin(D, axis=0)
+        print('end clusters')
+        
+        
+        ## Average together clusters to get barycenters
+        print('start barycenters')
+        
+        for j in range(k):
+            # Pick out the digits in this cluster
+            I = (c == j)
+            
+            # Compute the barycenter for this cluster
+            # FIXME: add a utility version of sinkhorn_barycenter() for efficiency and avoiding the progress bar
+            r[:,j], _, _ = sinkhorn_barycenter(M, X[:,I], noise = noise, eta = eta, l = l, iterations = iter_Dsink, steps = iter_grad)
+        
+        # Save it
+        R[:,:,i+1] = r
+        
+        print('end barycenters')
+    
+    
+    ## Return
+    return (c,r,R)
 
 
 
