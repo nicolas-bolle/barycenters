@@ -525,9 +525,9 @@ def _sinkhorn_barycenter(M, l, K, X, r = None, eta = 0.5, iter_grad = 20, iter_D
 # R: (n x k x (iter_lloyd+1)) numpy array giving the cluster center histograms after each step
 
 ## Info
-# Clusters digits using Lloyd's algorithm with Sinkhorn divergence as the metric, and averages digits using Sinkhorn barycenters computed with sharp Sinkhorn divergence gradient descent
+# Clusters digits using Lloyd's algorithm (k-means++ initialization) with Sinkhorn divergence as the metric, and averages digits using Sinkhorn barycenters computed with sharp Sinkhorn divergence gradient descent. In Lloyd, I take distance to the first power as the quantity of interest (not 2nd power like usual Euclidean distance versions use).
 
-def k_means_sinkhorn_barycenter(M, X, k, p = 0.01, noise = 0.01, eta = 0.5, l = 10, iter_sink = 20, iter_Dsink = 20, iter_grad = 4, iter_lloyd = 10):
+def k_means_sinkhorn_barycenter(M, X, k, p = 0.01, noise = 0.01, eta = 1, l = 10, iter_sink = 20, iter_Dsink = 20, iter_grad = 4, iter_lloyd = 10):
     
     ## Get relevant sizes
     n, N = np.shape(X)
@@ -542,9 +542,13 @@ def k_means_sinkhorn_barycenter(M, X, k, p = 0.01, noise = 0.01, eta = 0.5, l = 
     X = X / masses
     
     
+    ## Kernel
+    K = np.exp(-l*M)
+    
+    
     ## Initialize r as k random digits
-    I = np.random.choice(N, size = k, replace = False)
-    r = X[:,I]
+    #I = np.random.choice(N, size = k, replace = False)
+    #r = X[:,I]
     
     
     ## Initialize with k-means++, but picking from a subsample of the full data to reduce computation time
@@ -552,31 +556,35 @@ def k_means_sinkhorn_barycenter(M, X, k, p = 0.01, noise = 0.01, eta = 0.5, l = 
     # The formula is given by setting up a union bound:
     #  P(fail) <= k * [Single digit missing] = k * (1-1/k)^samples ~ k e^(-samples/k) <= p
     
-    #print('Initializing...')
+    print('Initializing...')
     
     # Number of samples to use
-    #num_samples = min(np.ceil(k * np.log(k/p)), N)
+    num_samples = min(int(np.ceil(k * np.log(k/p))), N)
     
     # Subset data for efficient k-means++ initialization
-    #Xp = X[:, np.random.choice(N, size = num_samples, replace = False)]
+    Xp = X[:, np.random.choice(N, size = num_samples, replace = False)]
     
-    # Pick the first digit
-    #I = list(np.random.choice(N, size = 1))
+    # Pick the first digit ("I" is a list)
+    I = [np.random.choice(num_samples)]
     
     # Iterate the k-means++ process to pick digits 2, ..., k
-    #for i in range(k-1):
-    #    # Distances
-    #    for j in range(k):
-    #        D[j,:] = sinkhorn_mk(r[:,j],X,M,K,iterations=iter_sink)
+    for i in range(k-1):
+        # Distances between picked digits and possible options
+        D = _pairwise_distances(Xp[:,I], Xp, M, K, iter_sink)
         
-    #    # Pick clusters
-    #    c = np.argmin(D, axis=0)
-    #    # FIXME: use the helper function here
+        # Pick the smallest distance for each digit
+        d = np.min(D, axis=0)
+        
+        # Pick the new digit use these distances as weights
+        new = np.random.choice(num_samples, p = d / sum(d))
+        
+        # Add it to our list of digits
+        I.append(new)
     
-    #print('Done initializing')
+    # Define r to have columns giving the histograms of these digits
+    r = Xp[:,I]
     
-    ## Kernel
-    K = np.exp(-l*M)
+    print('Done initializing')
     
     
     ## For keeping track of histograms
