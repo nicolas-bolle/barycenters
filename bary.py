@@ -357,7 +357,7 @@ def plot_digits(X, width=5):
                 ax.imshow(np.reshape(X[:,i], (28,28)))
                 ax.set_xticks([])
                 ax.set_yticks([])
-                ax.set_title(str(i))
+                ax.set_title(str(i+1))
                 i = i + 1
 
                 
@@ -508,6 +508,7 @@ def _sinkhorn_barycenter(M, l, K, X, r = None, eta = 0.5, iter_grad = 20, iter_D
 # k: number of clusters to make
 
 # Optional ones:
+# p: the probability of "failure" when subsetting data for quick initilization
 # noise: how much of the total mass should be dedicated to "noise"; so a number [0,1)
 # eta: the amount the (1-normalized) gradient is scaled by
 # l: lambda for the individual DSinkhorn computations
@@ -516,7 +517,7 @@ def _sinkhorn_barycenter(M, l, K, X, r = None, eta = 0.5, iter_grad = 20, iter_D
 # iter_Dsink: number of iterations to do in the DSinkhorn computations
 # iter_grad: number of gradient descent steps to do
 # iter_lloyd: number of iterations to do of Lloyd's algorithm
-# p:
+# I: manually initialize the representatives for initial clusters of seeds, by passing it columns of X
 
 
 ## Output:
@@ -527,7 +528,7 @@ def _sinkhorn_barycenter(M, l, K, X, r = None, eta = 0.5, iter_grad = 20, iter_D
 ## Info
 # Clusters digits using Lloyd's algorithm (k-means++ initialization) with Sinkhorn divergence as the metric, and averages digits using Sinkhorn barycenters computed with sharp Sinkhorn divergence gradient descent. In Lloyd, I take distance to the first power as the quantity of interest (not 2nd power like usual Euclidean distance versions use).
 
-def k_means_sinkhorn_barycenter(M, X, k, p = 0.01, noise = 0.01, eta = 1, l = 10, iter_sink = 20, iter_Dsink = 20, iter_grad = 4, iter_lloyd = 10):
+def k_means_sinkhorn_barycenter(M, X, k, p = 0.01, noise = 0.01, eta = 1, l = 10, iter_sink = 20, iter_Dsink = 20, iter_grad = 4, iter_lloyd = 10, I = None):
     
     ## Get relevant sizes
     n, N = np.shape(X)
@@ -558,31 +559,41 @@ def k_means_sinkhorn_barycenter(M, X, k, p = 0.01, noise = 0.01, eta = 1, l = 10
     
     print('Initializing...')
     
-    # Number of samples to use
-    num_samples = min(int(np.ceil(k * np.log(k/p))), N)
+    if I is None:
     
-    # Subset data for efficient k-means++ initialization
-    Xp = X[:, np.random.choice(N, size = num_samples, replace = False)]
-    
-    # Pick the first digit ("I" is a list)
-    I = [np.random.choice(num_samples)]
-    
-    # Iterate the k-means++ process to pick digits 2, ..., k
-    for i in range(k-1):
-        # Distances between picked digits and possible options
-        D = _pairwise_distances(Xp[:,I], Xp, M, K, iter_sink)
+        # Number of samples to use
+        num_samples = min(int(np.ceil(k * np.log(k/p))), N)
+
+        # Subset data for efficient k-means++ initialization
+        Xp = X[:, np.random.choice(N, size = num_samples, replace = False)]
+
+        # Pick the first digit ("I" is a list)
+        I = [np.random.choice(num_samples)]
+
+        # Iterate the k-means++ process to pick digits 2, ..., k
+        for i in range(k-1):
+            # Distances between picked digits and possible options
+            D = _pairwise_distances(Xp[:,I], Xp, M, K, iter_sink)
+
+            # Pick the smallest distance for each digit
+            d = np.min(D, axis=0)
+
+            # Pick the new digit use these distances as weights
+            new = np.random.choice(num_samples, p = d / sum(d))
+
+            # Add it to our list of digits
+            I.append(new)
+
+        # Define r to have columns giving the histograms of these digits
+        r = Xp[:,I]
         
-        # Pick the smallest distance for each digit
-        d = np.min(D, axis=0)
+    else:
         
-        # Pick the new digit use these distances as weights
-        new = np.random.choice(num_samples, p = d / sum(d))
-        
-        # Add it to our list of digits
-        I.append(new)
-    
-    # Define r to have columns giving the histograms of these digits
-    r = Xp[:,I]
+        if len(I) != k:
+            print("Error: the list I must have length k")
+            return
+        else:
+            r = X[:,I]
     
     print('Done initializing')
     
