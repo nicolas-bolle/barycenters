@@ -316,6 +316,60 @@ def load_MNIST(N=1000):
 
 
 
+### load_quickdraw
+
+## Inputs:
+# N: number of digits to grab
+
+## Output:
+# M: distance matrix for the 784-element histogram
+# X1: (784 x N) numpy array for the lightbulbs, where columns are (normalized) histograms for each digit
+# X2: (784 x N) numpy array for the rainbows, where columns are (normalized) histograms for each digit
+
+## Info
+# Loads in the Google QuickDraw lightbulb and rainbow files for running Sinkhorn stuff on them
+
+def load_quickdraw(N=1000):
+    
+    ## Get M
+
+    n = 28 * 28
+
+    # To make sure I don't mess up indexing things, I'll set up a list of locations and reshape it into a matrix
+    # So when I calculate a pairwise distance in the matrix, I can easily associate it to the location in the vector
+    locations_vec = np.array(range(n))
+    locations_arr = np.reshape(locations_vec, (28,28))
+
+    M = np.zeros((n,n))
+    # Having 4 "for" loops is a bit embarassing, but I'm not trying to think too hard right now
+    for i1 in range(28):
+        for j1 in range(28):
+            for i2 in range(28):
+                for j2 in range(28):
+                    M[locations_arr[i1,j1], locations_arr[i2,j2]] = np.sqrt((i1-i2)**2 + (j1-j2)**2)
+    
+    
+    ## Load lightbulbs data
+    aux = np.load("Data/full_numpy_bitmap_light bulb.npy")
+    I = np.random.choice(120879,N,replace=False)
+    X1 = np.transpose(aux[I,:])
+    
+    ## Load rainbows data
+    aux = np.load("Data/full_numpy_bitmap_rainbow.npy")
+    I = np.random.choice(120879,N,replace=False)
+    X2 = np.transpose(aux[I,:])
+    
+    
+    ## Normalize images
+    X1 = X1 / np.reshape(np.sum(X1,0), (1,N))
+    X2 = X2 / np.reshape(np.sum(X2,0), (1,N))
+    
+    
+    ## Return
+    return (M,X1,X2)
+
+
+
 ### plot_digits
 
 ## Inputs:
