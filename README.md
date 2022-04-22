@@ -1,4 +1,4 @@
-Implementation of Wasserstein barycenter stuff, for average case images and image clustering
+Implementation of Wasserstein barycenter stuff, for average-case images and image clustering
 
 The 3 main references I'm using are
 https://arxiv.org/abs/1306.0895
